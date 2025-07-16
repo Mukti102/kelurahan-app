@@ -189,10 +189,9 @@ class LetterSKCKController extends Controller
             Alert::success('Success', 'Pengajuan Berhasil Diubah');
             return redirect()->route('surat-pengantar-skck.index');
         } catch (Exception $e) {
-            Alert::error('Error',"Gagal Di Update");
+            Alert::error('Error', "Gagal Di Update");
             return back();
         }
-
     }
 
     public function konfirmasi(Request $request, $id)
@@ -230,6 +229,14 @@ class LetterSKCKController extends Controller
     public function destroy(LetterSKCK $letterSKCK, $id)
     {
         $surat = LetterSKCK::with('letter')->find($id);
+
+        // Hapus semua file dari storage
+        if ($surat->letter && is_array($surat->letter->berkas)) {
+            foreach ($surat->letter->berkas as $file) {
+                Storage::disk('public')->delete($file['path']);
+            }
+        }
+
         $surat->letter()->delete();
         $surat->delete();
         Alert::success('Success', 'Pengajuan Berhasil Dihapus');
