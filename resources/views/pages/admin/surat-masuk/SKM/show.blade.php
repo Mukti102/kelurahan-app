@@ -98,6 +98,31 @@
                                                 <th>Jumlah Anggota Keluarga</th>
                                                 <td>{{ $surat->jumlah_anggota_keluarga }}</td>
                                             </tr>
+                                            <tr>
+                                                <th>Berkas</th>
+                                                <td>
+
+                                                    @php
+                                                        $berkas = is_string($surat->letter->berkas)
+                                                            ? json_decode($surat->letter->berkas, true)
+                                                            : $surat->letter->berkas;
+                                                    @endphp
+
+                                                    @foreach ($berkas as $file)
+                                                        <div class="mb-2">
+                                                            <strong>{{ ucwords(str_replace('_', ' ', $file['name'] ?? '_')) }}</strong><br>
+                                                            @if (!empty($file['path']))
+                                                                <a href="{{ asset('storage/' . $file['path']) }}"
+                                                                    target="_blank" class="text-blue-500 underline">
+                                                                    Lihat File
+                                                                </a>
+                                                            @endif
+                                                        </div>
+                                                    @endforeach
+
+
+                                                </td>
+                                            </tr>
                                         </tbody>
                                     </table>
                                 </div>

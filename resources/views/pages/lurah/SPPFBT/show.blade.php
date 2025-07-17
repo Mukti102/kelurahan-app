@@ -4,7 +4,7 @@
 
 @section('content')
     <div class="container mt-3 p-4">
-        <x-konfirmasi :action="route('surat-pernyataan-penguasaan-tanah.konfirmasi', Crypt::encrypt($surat->id))" />
+        <x-konfirmasi :action="route('surat-pernyataan-penguasaan-tanah.konfirmasi', Crypt::encrypt($surat->id))" :surat="$surat" />
         <div class="container card p-5">
             <x-templates.surat-tanah :surat="$surat">SURAT KETERANGAN TANAH</x-templates.surat-tanah>
         </div>

@@ -80,7 +80,7 @@ class LetterSKCKController extends Controller
 
                 $letter = new Letter([
                     'user_id' => $auth->id,
-                    'priority' => 9,
+                    'priority' => 2,
                     'berkas' => $filesMeta
                 ]);
 

@@ -91,7 +91,7 @@ class LetterMeninggalController extends Controller
 
                 $letter = new Letter([
                     'user_id'  => Auth::user()->id,
-                    'priority' => 10,
+                    'priority' => 3,
                     'status'   => self::STATUS_PROSES,
                     'berkas'   => $filesMeta,
                 ]);

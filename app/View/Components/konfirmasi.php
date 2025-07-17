@@ -13,8 +13,10 @@ class konfirmasi extends Component
      */
 
     public $action;
-    public function __construct($action)
-    {
+    public $surat;
+    public function __construct($action,$surat)
+    {       
+        $this->surat = $surat;
         $this->action = $action;
     }
 

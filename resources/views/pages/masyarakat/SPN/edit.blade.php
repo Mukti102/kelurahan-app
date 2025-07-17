@@ -29,6 +29,7 @@
                         </div>
                         <div class="card-body">
                             <form class="row"
+                            enctype="multipart/form-data"
                                 action="{{ route('surat-pengantar-nikah.update', Crypt::encrypt($surat->id)) }}"
                                 method="POST">
                                 @method('PUT')
@@ -290,6 +291,47 @@
                                         <label for="alamat_ibu">Alamat Ibu</label>
                                         <textarea required class="form-control" id="alamat_ibu" name="alamat_ibu" placeholder="Alamat Ibu">{{ $surat->alamat_ibu }}</textarea>
                                         @error('alamat_ibu')
+                                            <small style="color: red"
+                                                class="form-text text-muted">{{ $message }}</small>
+                                        @enderror
+                                    </div>
+
+
+                                    <div>
+                                        <h5 style="font-weight:bolder" class="text-primary fs-5 mt-4">Syarat Berkas Yang
+                                            Harus Di Unggah</h5>
+                                        <p class="fs-6 text-secondary">**Syarat Berkas Yang Harus Di Unggah dalam bentuk
+                                            format PNG/JPE/JPEG/PDF</p>
+                                    </div>
+                                    {{-- berkas --}}
+                                    <div
+                                        class="form-group {{ $errors->has('scan_ktp_calon_mempelai') ? 'has-error' : '' }}">
+                                        <label for="scan_ktp_calon_mempelai">Scan KTP Mempelai</label>
+                                        <input value="{{ old('scan_ktp_calon_mempelai') }}"  type="file"
+                                            class="form-control" id="scan_ktp_calon_mempelai"
+                                            name="scan_ktp_calon_mempelai" placeholder="" />
+                                        @error('scan_ktp_calon_mempelai')
+                                            <small style="color: red"
+                                                class="form-text text-muted">{{ $message }}</small>
+                                        @enderror
+                                    </div>
+                                    <div
+                                        class="form-group {{ $errors->has('scan_kk_calon_mempelai') ? 'has-error' : '' }}">
+                                        <label for="scan_kk_calon_mempelai">Scan KK Mempelai</label>
+                                        <input value="{{ old('scan_kk_calon_mempelai') }}"  type="file"
+                                            class="form-control" id="scan_kk_calon_mempelai"
+                                            name="scan_kk_calon_mempelai" placeholder="" />
+                                        @error('scan_kk_calon_mempelai')
+                                            <small style="color: red"
+                                                class="form-text text-muted">{{ $message }}</small>
+                                        @enderror
+                                    </div>
+                                    <div class="form-group {{ $errors->has('scan_akta_kelahiran') ? 'has-error' : '' }}">
+                                        <label for="scan_akta_kelahiran">Scan Akta Kelahiran</label>
+                                        <input value="{{ old('scan_akta_kelahiran') }}"  type="file"
+                                            class="form-control" id="scan_akta_kelahiran" name="scan_akta_kelahiran"
+                                            placeholder="" />
+                                        @error('scan_akta_kelahiran')
                                             <small style="color: red"
                                                 class="form-text text-muted">{{ $message }}</small>
                                         @enderror

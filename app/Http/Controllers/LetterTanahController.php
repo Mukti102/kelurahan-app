@@ -10,7 +10,13 @@ use App\Models\LetterTanah;
 use App\Models\User;
 use Dompdf\Dompdf;
 use Dompdf\Options;
+use Exception;
+use Illuminate\Container\Attributes\Log;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log as FacadesLog;
+use Illuminate\Support\Facades\Storage;
 use RealRashid\SweetAlert\Facades\Alert;
 
 class LetterTanahController extends Controller
@@ -20,7 +26,7 @@ class LetterTanahController extends Controller
      */
     public function index()
     {
-        $user = auth()->user();
+        $user = Auth::user();
         $surats = LetterTanah::with('letter')
             ->whereHas('letter', function ($query) use ($user) {
                 $query->where('user_id', $user->id);
@@ -56,64 +62,33 @@ class LetterTanahController extends Controller
      */
     public function store(Request $request)
     {
-        // return $request->all();
-        // Validasi input data
-        $request->validate([
-            'nama_pemohon'      => 'required',
-            'umur'              => 'required',
-            'agama'              => 'required',
-            'pekerjaan'         => 'required',
-            'jenis_kelamin'     => 'required',
-            'alamat'            => 'required',
-            'lokasi_tanah'      => 'required',
-            'luas_tanah'        => 'required',
-            'harga_tanah'       => 'required',
-            'status_tanah'      => 'required',
-            'digunakan_tanah'   => 'required',
-            'batas_barat'       => 'required',
-            'batas_timur'       => 'required',
-            'batas_utara'       => 'required',
-            'batas_selatan'     => 'required',
-        ]);
+        $validated = $this->validateRequest($request);
+        $user = Auth::user();
 
         try {
+            DB::transaction(function () use ($request, $validated, $user) {
+                // Simpan data tanah ke database
+                $letterTanah = LetterTanah::create($validated);
 
-            $user = auth()->user();
+                $filesMeta = $this->storeFiles($request);
 
-
-            // Simpan data tanah ke database
-            $letterTanah = LetterTanah::create([
-                'nama_pemohon'      => $request->nama_pemohon,
-                'umur'              => $request->umur,
-                'agama'              => $request->agama,
-                'pekerjaan'         => $request->pekerjaan,
-                'alamat'         => $request->alamat,
-                'jenis_kelamin'     => $request->jenis_kelamin,
-                'lokasi_tanah'      => $request->lokasi_tanah,
-                'luas_tanah'        => $request->luas_tanah,
-                'harga_tanah'       => $request->harga_tanah,
-                'status_tanah'      => $request->status_tanah,
-                'digunakan_tanah'   => $request->digunakan_tanah,
-                'batas_barat'       => $request->batas_barat,
-                'batas_timur'       => $request->batas_timur,
-                'batas_utara'       => $request->batas_utara,
-                'batas_selatan'     => $request->batas_selatan,
-            ]);
-
-            $letter = new Letter([
-                'user_id'   => $user->id,
-            ]);
-
-            $letterTanah->letter()->save($letter);
+                $letter = new Letter([
+                    'user_id'   => $user->id,
+                    'priority' => 0,
+                    'status' => 'sedang diproses',
+                    'berkas' => $filesMeta,
+                ]);
+                $letterTanah->letter()->save($letter);
+            });
 
             Alert::success('Success', 'Data berhasil di kirim');
 
             // Mengalihkan user ke halaman yang diinginkan setelah berhasil menyimpan data
             return redirect()->route('surat-pernyataan-penguasaan-tanah.index')->with('success', 'Data berhasil disimpan');
         } catch (\Illuminate\Database\QueryException $e) {
+            FacadesLog::info("error Create surat Tanah", ['message' => $e->getMessage()]);
             Alert::error('Error', $e->getMessage());
-        } catch (\Exception $e) {
-            Alert::error('Error', $e->getMessage());
+            return back();
         }
     }
 
@@ -122,7 +97,7 @@ class LetterTanahController extends Controller
      */
     public function show(LetterTanah $letterTanah, $id)
     {
-        $auth = auth()->user();
+        $auth = Auth::user();
         $surat = LetterTanah::find(decrypt($id));
         if ($auth->role == 'admin') {
             return view('pages.admin.surat-masuk.SPPFBT.show', compact('surat'));
@@ -209,7 +184,75 @@ class LetterTanahController extends Controller
      */
     public function update(Request $request, LetterTanah $letterTanah, $id)
     {
-        $request->validate([
+        $validated = $this->validateRequest($request);
+        $surat = LetterTanah::with('letter')->find(decrypt($id));
+
+        try {
+            DB::transaction(function () use ($request, $validated, $surat) {
+                $surat->update($validated);
+
+                $meta = collect($surat->letter->berkas);
+
+                foreach (['scan_ktp', 'scan_kk', 'scan_SPPT_PBB', 'scan_surat_bukti'] as $field) {
+                    if ($request->hasFile($field)) {
+
+                        // hapus file lama
+                        if ($old = $meta->firstWhere('name', $field)) {
+                            Storage::disk('public')->delete($old['path']);
+                            $meta = $meta->reject(fn($f) => $f['name'] === $field);
+                        }
+
+                        // simpan file baru
+                        $file       = $request->file($field);
+                        $filename   = $field . '_' . now()->timestamp . '.' . $file->getClientOriginalExtension();
+                        $storedPath = $file->storeAs('letters/kepemilikan_tanah', $filename, 'public');
+
+                        $meta->push(['name' => $field, 'path' => $storedPath]);
+                    }
+                }
+                // simpan metadata baru
+                $surat->letter->update(['berkas' => $meta->values()]);
+            });
+            Alert::success('Success', 'Pengajuan Berhasil Diubah');
+            return redirect()->route('surat-pernyataan-penguasaan-tanah.index');
+        } catch (Exception $e) {
+        }
+    }
+
+    /**
+     * Remove the specified resource from storage.
+     */
+    public function destroy($id)
+    {
+        $surat = LetterTanah::with('letter')->findOrFail($id);
+
+        DB::transaction(function() use($surat){
+            if ($surat->letter && is_array($surat->letter->berkas)) {
+                foreach ($surat->letter->berkas as $file) {
+                    Storage::disk('public')->delete($file['path']);
+                }
+            }
+    
+            // Hapus relasi dulu
+            $surat->letter()->delete();
+    
+            // Hapus surat tanah
+            $surat->delete();
+        });
+
+        Alert::success('Success', 'Pengajuan Berhasil Dihapus');
+        return redirect()->back()->with('Success', 'Pengajuan Berhasil dihapus!');
+    }
+
+
+
+
+
+
+    // ================== Helper ================================
+    private function validateRequest(Request $request, bool $includeFiles = true): array
+    {
+        $rules = [
             'nama_pemohon'      => 'required',
             'umur'              => 'required',
             'agama'              => 'required',
@@ -225,31 +268,41 @@ class LetterTanahController extends Controller
             'batas_timur'       => 'required',
             'batas_utara'       => 'required',
             'batas_selatan'     => 'required',
-        ]);
+        ];
 
-        $surat = LetterTanah::with('letter')->find(decrypt($id));
-        $surat->update($request->all());
-        Alert::success('Success', 'Pengajuan Berhasil Diubah');
-        return redirect()->route('surat-pernyataan-penguasaan-tanah.index');
+        if ($includeFiles) {
+            $fileRule = 'nullable|mimes:jpg,jpeg,png,pdf';
+            $rules += [
+                'scan_ktp'                 => $fileRule,
+                'scan_kk'                  => $fileRule,
+                'scan_SPPT_PBB'            => $fileRule,
+                'scan_surat_bukti'         => $fileRule,
+            ];
+        }
+
+        return $request->validate($rules);
     }
 
     /**
-     * Remove the specified resource from storage.
+     * Simpan seluruh lampiran ke storage & kembalikan metadata.
+     *
+     * @throws FileNotFoundException
      */
-    public function destroy($id)
+    private function storeFiles(Request $request): array
     {
-        $surat = LetterTanah::with('letter')->findOrFail($id);
-        
-        // Hapus relasi dulu
-        $surat->letter()->delete();
-        
-        // Hapus surat tanah
-        $surat->delete();
-    
-        // Alert::success('Success', 'Pengajuan Berhasil Dihapus');
-        // return redirect()->route('pages.admin.surat-masuk.SPPFBT.index');
-        return redirect()->back()->with('Success', 'Pengajuan Berhasil dihapus!');
+        return collect(['scan_ktp', 'scan_kk', 'scan_SPPT_PBB', 'scan_surat_bukti'])
+            ->filter(fn($field) => $request->hasFile($field))
+            ->map(function ($field) use ($request) {
+                $file       = $request->file($field);
+                $filename   = $field . '_' . now()->timestamp . '.' . $file->getClientOriginalExtension();
+                $storedPath = $file->storeAs('letters/kepemilikan_tanah', $filename, 'public');
 
+                return [
+                    'name' => $field,
+                    'path' => $storedPath,
+                ];
+            })
+            ->values()
+            ->all();
     }
-    
 }

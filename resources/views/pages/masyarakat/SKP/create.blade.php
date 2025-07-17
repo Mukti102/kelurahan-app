@@ -28,7 +28,7 @@
                             <div class="card-title">Form Pengajuan</div>
                         </div>
                         <div class="card-body">
-                            <form class="row" action="{{ route('surat-keterangan-penghasilan.store') }}" method="POST">
+                            <form enctype="multipart/form-data" class="row" action="{{ route('surat-keterangan-penghasilan.store') }}" method="POST">
                                 @csrf
                                 <div class="col-md-6">
                                     <div class="form-group {{ $errors->has('nama_pemohon') ? 'has-error' : '' }}">
@@ -187,6 +187,33 @@
                                         <textarea cols="10" rows="5" required type="text" name="alamat_anak" class="form-control"
                                             id="alamat_anak" placeholder="Jl... no.."></textarea>
                                         @error('alamat_anak')
+                                            <small style="color: red"
+                                                class="form-text text-muted">{{ $message }}</small>
+                                        @enderror
+                                    </div>
+
+
+                                    <div>
+                                        <h5 style="font-weight:bolder" class="text-primary fs-5 mt-4">Syarat Berkas Yang
+                                            Harus Di Unggah</h5>
+                                        <p class="fs-6 text-secondary">**Syarat Berkas Yang Harus Di Unggah dalam bentuk
+                                            format PNG/JPE/JPEG/PDF</p>
+                                    </div>
+                                    {{-- berkas --}}
+                                    <div class="form-group {{ $errors->has('scan_ktp') ? 'has-error' : '' }}">
+                                        <label for="scan_ktp">Scan KTP</label>
+                                        <input value="{{ old('scan_ktp') }}" required type="file"
+                                            class="form-control" id="scan_ktp" name="scan_ktp" placeholder="" />
+                                        @error('scan_ktp')
+                                            <small style="color: red"
+                                                class="form-text text-muted">{{ $message }}</small>
+                                        @enderror
+                                    </div>
+                                    <div class="form-group {{ $errors->has('scan_kk') ? 'has-error' : '' }}">
+                                        <label for="scan_kk">Scan KK Orang Tua / Wali</label>
+                                        <input value="{{ old('scan_kk') }}" required type="file" class="form-control"
+                                            id="scan_kk" name="scan_kk" placeholder="" />
+                                        @error('scan_kk')
                                             <small style="color: red"
                                                 class="form-text text-muted">{{ $message }}</small>
                                         @enderror

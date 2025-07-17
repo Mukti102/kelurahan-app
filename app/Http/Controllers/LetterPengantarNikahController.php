@@ -8,7 +8,12 @@ use App\Models\LetterPengantarNikah;
 use App\Models\User;
 use Dompdf\Dompdf;
 use Dompdf\Options;
+use Exception;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use RealRashid\SweetAlert\Facades\Alert;
 
 class LetterPengantarNikahController extends Controller
@@ -18,7 +23,7 @@ class LetterPengantarNikahController extends Controller
      */
     public function index()
     {
-        $user = auth()->user();
+        $user = Auth::user();
         $surats = LetterPengantarNikah::with('letter')
             ->whereHas('letter', function ($query) use ($user) {
                 $query->where('user_id', $user->id);
@@ -56,48 +61,33 @@ class LetterPengantarNikahController extends Controller
     {
 
         // Validasi data input
-        $validatedData = $request->validate([
-            'nama_lengkap' => 'required|string|max:255',
-            'nik' => 'required',
-            'jenis_kelamin' => 'required|in:laki-laki,perempuan',
-            'tempat_lahir' => 'required|string|max:255',
-            'tanggal_lahir' => 'required|date',
-            'kewarganegaraan' => 'required|string|max:50',
-            'agama' => 'required|string|max:50',
-            'status_perkawinan' => 'required',
-            'pekerjaan' => 'required|string|max:255',
-            'alamat' => 'required|string|max:255',
-            'nama_lengkap_ayah' => 'required|string|max:255',
-            'nik_ayah' => 'required',
-            'tempat_lahir_ayah' => 'required|string|max:255',
-            'tanggal_lahir_ayah' => 'required|date',
-            'kewarganegaraan_ayah' => 'required|string|max:50',
-            'agama_ayah' => 'required|string|max:50',
-            'pekerjaan_ayah' => 'required|string|max:255',
-            'alamat_ayah' => 'required|string|max:255',
-            'nama_lengkap_ibu' => 'required|string|max:255',
-            'nik_ibu' => 'required',
-            'tempat_lahir_ibu' => 'required|string|max:255',
-            'tanggal_lahir_ibu' => 'required|date',
-            'kewarganegaraan_ibu' => 'required|string|max:50',
-            'pekerjaan_ibu' => 'required|string|max:255',
-            'alamat_ibu' => 'required|string|max:255',
-        ]);
+        $validatedData = $this->validateRequest($request);
+
+        try {
+            DB::transaction(function () use ($request, $validatedData) {
+                // Simpan data ke database
+                $letterPengantarNikah =  LetterPengantarNikah::create($validatedData);
+
+                $fileMeta = $this->storeFiles($request);
 
 
-        // Simpan data ke database
-        $letterPengantarNikah =  LetterPengantarNikah::create([
-            ...$validatedData
-        ]);
+                $letter = new Letter([
+                    'user_id' => Auth::user()->id,
+                    'priority' => 0,
+                    'status' => 'sedang diproses',
+                    'berkas' => $fileMeta,
+                ]);
 
-        $letter = new Letter([
-            'user_id' => auth()->user()->id,
-        ]);
+                $letterPengantarNikah->letter()->save($letter);
+            });
 
-        $letterPengantarNikah->letter()->save($letter);
-
-        Alert::success('Success', 'Pengajuan Berhasil Dikirim');
-        return redirect()->route('surat-pengantar-nikah.index')->with('success', 'berhasil Di kirim');
+            Alert::success('Success', 'Pengajuan Berhasil Dikirim');
+            return redirect()->route('surat-pengantar-nikah.index')->with('success', 'berhasil Di kirim');
+        } catch (Exception $e) {
+            Log::info("error Create Surat Nikah", ['message' => $e->getMessage()]);
+            Alert::error("error", "gagal Mengirim Surat Nikah");
+            return back();
+        }
     }
 
     public function cetak($id)
@@ -131,7 +121,7 @@ class LetterPengantarNikahController extends Controller
     public function show(LetterPengantarNikah $letterPengantarNikah, $id)
     {
         $surat = LetterPengantarNikah::find(decrypt($id));
-        $auth = auth()->user();
+        $auth = Auth::user();
         if ($auth->role == 'admin') {
             return view('pages.admin.surat-masuk.SPN.show', compact('surat'));
         } elseif ($auth->role == 'lurah') {
@@ -192,7 +182,69 @@ class LetterPengantarNikahController extends Controller
      */
     public function update(Request $request, LetterPengantarNikah $letterPengantarNikah, $id)
     {
-        $validatedData = $request->validate([
+        $validatedData = $this->validateRequest($request);
+        $surat = LetterPengantarNikah::with('letter')->find(decrypt($id));
+        try {
+            DB::transaction(function () use ($request, $validatedData, $surat) {
+                $surat->update($validatedData);
+
+                $meta = collect($surat->letter->berkas);   // meta lama
+
+                foreach (['scan_ktp_calon_mempelai', 'scan_kk_calon_mempelai', 'scan_akta_kelahiran'] as $field) {
+                    if ($request->hasFile($field)) {
+                        // hapus file lama
+                        if ($old = $meta->firstWhere('name', $field)) {
+                            Storage::disk('public')->delete($old['path']);
+                            $meta = $meta->reject(fn($f) => $f['name'] === $field);
+                        }
+
+                        // simpan file baru
+                        $file       = $request->file($field);
+                        $filename   = $field . '_' . now()->timestamp . '.' . $file->getClientOriginalExtension();
+                        $storedPath = $file->storeAs('letters/surat_nikah', $filename, 'public');
+
+                        $meta->push(['name' => $field, 'path' => $storedPath]);
+                    }
+                }
+
+                $surat->letter->update(['berkas' => $meta->values()]);
+            });
+            Alert::success('Success', 'Pengajuan Berhasil Diubah');
+            return redirect()->route('surat-pengantar-nikah.index');
+        } catch (Exception $e) {
+            Log::info('Infor Eror Update Surat Nikah', ['message' => $e->getMessage()]);
+            Alert::error("error", 'Gagal Update Surat Nikah');
+            return back();
+        }
+    }
+
+    /**
+     * Remove the specified resource from storage.
+     */
+    public function destroy(LetterPengantarNikah $letterPengantarNikah, $id)
+    {
+        $surat = LetterPengantarNikah::with('letter')->find($id);
+
+        if ($surat->letter && is_array($surat->letter->berkas)) {
+            foreach ($surat->letter->berkas as $file) {
+                Storage::disk('public')->delete($file['path']);
+            }
+        }
+
+        $surat->letter()->delete();
+        $surat->delete();
+        Alert::success('Success', 'Pengajuan Berhasil Dihapus');
+        return redirect()->route('surat-pengantar-nikah.index');
+    }
+
+
+
+
+
+    // ====================== Helper =================================
+    private function validateRequest(Request $request, bool $includeFiles = true): array
+    {
+        $rules = [
             'nama_lengkap' => 'required|string|max:255',
             'nik' => 'required',
             'jenis_kelamin' => 'required|in:laki-laki,perempuan',
@@ -218,23 +270,41 @@ class LetterPengantarNikahController extends Controller
             'kewarganegaraan_ibu' => 'required|string|max:50',
             'pekerjaan_ibu' => 'required|string|max:255',
             'alamat_ibu' => 'required|string|max:255',
-        ]);
+        ];
 
-        $surat = LetterPengantarNikah::with('letter')->find(decrypt($id));
-        $surat->update($validatedData);
-        Alert::success('Success', 'Pengajuan Berhasil Diubah');
-        return redirect()->route('surat-pengantar-nikah.index');
+        if ($includeFiles) {
+            $fileRule = 'nullable|mimes:jpg,jpeg,png,pdf';
+            $rules += [
+                'scan_ktp'                 => $fileRule,
+                'scan_kk'                  => $fileRule,
+                'scan_surat_keterangan_rm' => $fileRule,
+                'scan_ktp_pelapor'         => $fileRule,
+            ];
+        }
+
+        return $request->validate($rules);
     }
 
     /**
-     * Remove the specified resource from storage.
+     * Simpan seluruh lampiran ke storage & kembalikan metadata.
+     *
+     * @throws FileNotFoundException
      */
-    public function destroy(LetterPengantarNikah $letterPengantarNikah, $id)
+    private function storeFiles(Request $request): array
     {
-        $surat = LetterPengantarNikah::with('letter')->find($id);
-        $surat->letter()->delete();
-        $surat->delete();
-        Alert::success('Success', 'Pengajuan Berhasil Dihapus');
-        return redirect()->route('surat-pengantar-nikah.index');
+        return collect(['scan_ktp_calon_mempelai', 'scan_kk_calon_mempelai', 'scan_akta_kelahiran'])
+            ->filter(fn($field) => $request->hasFile($field))
+            ->map(function ($field) use ($request) {
+                $file       = $request->file($field);
+                $filename   = $field . '_' . now()->timestamp . '.' . $file->getClientOriginalExtension();
+                $storedPath = $file->storeAs('letters/surat_nikah', $filename, 'public');
+
+                return [
+                    'name' => $field,
+                    'path' => $storedPath,
+                ];
+            })
+            ->values()
+            ->all();
     }
 }

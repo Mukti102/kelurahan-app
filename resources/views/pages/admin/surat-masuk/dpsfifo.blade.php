@@ -42,6 +42,7 @@
                                             <th>Type Surat</th>
                                             <th>Tanggal Pengajuan</th>
                                             <th>Jam Pengajuan</th>
+                                            <th>Nilai Priority</th>
                                             <th>Status</th>
                                             <th>Keterangan</th>
                                             <th>Action</th>
@@ -95,6 +96,8 @@
                                                     <td>{{ Carbon::parse($item->created_at)->translatedFormat('d F Y') }}
                                                     </td>
                                                     <td>{{ Carbon::parse($item->created_at)->translatedFormat('H:i') }}
+                                                    </td>
+                                                    <td>{{ $item->priority }}
                                                     </td>
                                                     <td>
                                                         <x-badge :status="$item->status ?? 'sedang diproses'" />

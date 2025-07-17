@@ -24,9 +24,21 @@
                 <li class="link"><a href="#subscribe">Sejarah</a></li>
                 <li class="link"><a href="#visimisi">Visi Misi</a></li>
                 <li class="link"><a href="#blog">Berita</a></li>
+                @auth
+                    <li class="link">
+                        <form action="{{route('logout')}}" method="POST">
+                            @csrf
+                            <button type="submit">Logout</button>
+                        </form>
+
+                    </li>
+                @endauth
+                @guest
                 <li class="link"><a
-                        href="{{ Auth::check() ? route('logout') : route('login') }}">{{ Auth::check() ? 'Logout' : 'Login' }}</a>
+                        href="{{route('login')}}">Login</a>
                 </li>
+                    
+                @endguest
 
             </ul>
 

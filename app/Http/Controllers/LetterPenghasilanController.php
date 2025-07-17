@@ -8,7 +8,12 @@ use App\Models\LetterPenghasilan;
 use App\Models\User;
 use Dompdf\Dompdf;
 use Dompdf\Options;
+use Exception;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use RealRashid\SweetAlert\Facades\Alert;
 
 class LetterPenghasilanController extends Controller
@@ -18,7 +23,7 @@ class LetterPenghasilanController extends Controller
      */
     public function index()
     {
-        $user = auth()->user();
+        $user = Auth::user();
         $surats = LetterPenghasilan::with('letter')
             ->whereHas('letter', function ($query) use ($user) {
                 $query->where('user_id', $user->id);
@@ -64,47 +69,35 @@ class LetterPenghasilanController extends Controller
      */
     public function store(Request $request)
     {
-        $user = auth()->user();
+        $user = Auth::user();
         // Validasi input
-        $validated = $request->validate([
-            'nama_pemohon' => 'required|string|max:255',
-            'nik_pemohon' => 'required|string|max:255',
-            'pekerjaan' => 'required|string|max:255',
-            'jenis_kelamin' => 'required|in:laki-laki,perempuan',
-            'tempat_lahir' => 'required',
-            'tanggal_lahir' => 'required',
-            'agama' => 'required',
-            'alamat' => 'required',
-            'pekerjaan' => 'required',
-            'penghasilan' => 'required|string|max:255',
-            'keperluan' => 'required',
-            'nama_anak' => 'required|string|max:255',
-            'nik_anak' => 'required|string|max:255',
-            'pekerjaan_anak' => 'required|string|max:255',
-            'jenis_kelamin_anak' => 'required|in:laki-laki,perempuan',
-            'tempat_lahir_anak' => 'required',
-            'tanggal_lahir_anak' => 'required',
-            'agama_anak' => 'required',
-            'alamat_anak' => 'required',
-        ]);
+        $validated = $this->validateRequest($request);
 
         try {
 
-            $letterPenghasilan =  LetterPenghasilan::create([
-                ...$validated
-            ]);
+            DB::transaction(function () use ($validated, $request, $user) {
 
-            $letter = new Letter([
-                'user_id' => $user->id,
-            ]);
+                $letterPenghasilan =  LetterPenghasilan::create($validated);
 
-            $letterPenghasilan->letter()->save($letter);
+                $filesMeta = $this->storeFiles($request);
+
+                $letter = new Letter([
+                    'user_id' => $user->id,
+                    'priority' => 0,
+                    'status' => 'sedang diproses',
+                    'berkas' => $filesMeta,
+                ]);
+
+                $letterPenghasilan->letter()->save($letter);
+            });
 
             Alert::success('Success', 'Pengajuan Berhasil Dikirim');
             // Redirect dengan pesan sukses
-            return redirect()->route('surat-penghasilan.index')
+            return redirect()->route('surat-keterangan-penghasilan.index')
                 ->with('success', 'Data berhasil disimpan.');
         } catch (\Exception $e) {
+            Log::info('error store penghasilan',['message' => $e->getMessage()]);
+            Alert::error("error", "Gagal Mengirim Surat");
             // Redirect dengan pesan error
             return back()->withErrors(['error' => 'Terjadi kesalahan: ' . $e->getMessage()]);
         }
@@ -116,7 +109,7 @@ class LetterPenghasilanController extends Controller
      */
     public function show(LetterPenghasilan $letterPenghasilan, $id)
     {
-        $auth = auth()->user();
+        $auth = Auth::user();
         $id = decrypt($id);
         $surat = LetterPenghasilan::find($id);
         if ($auth->role == 'lurah') {
@@ -195,7 +188,65 @@ class LetterPenghasilanController extends Controller
      */
     public function update(Request $request, LetterPenghasilan $letterPenghasilan, $id)
     {
-        $validated = $request->validate([
+        $validated = $this->validateRequest($request);
+        $surat = LetterPenghasilan::with('letter')->find(decrypt($id));
+        try {
+            DB::transaction(function () use ($validated, $request, $surat) {
+                $surat->update($validated);
+
+                $meta = collect($surat->letter->berkas);
+
+                foreach (['scan_ktp', 'scan_kk'] as $field) {
+                    if ($request->hasFile($field)) {
+
+                        // hapus file lama
+                        if ($old = $meta->firstWhere('name', $field)) {
+                            Storage::disk('public')->delete($old['path']);
+                            $meta = $meta->reject(fn($f) => $f['name'] === $field);
+                        }
+
+                        // simpan file baru
+                        $file       = $request->file($field);
+                        $filename   = $field . '_' . now()->timestamp . '.' . $file->getClientOriginalExtension();
+                        $storedPath = $file->storeAs('letters/penghasilan_ortu', $filename, 'public');
+
+                        $meta->push(['name' => $field, 'path' => $storedPath]);
+                    }
+                }
+                // simpan metadata baru
+                $surat->letter->update(['berkas' => $meta->values()]);
+            });
+            Alert::success('Success', 'Pengajuan Berhasil Diubah');
+            return redirect()->route('surat-keterangan-penghasilan.index');
+        } catch (Exception $e) {
+            Alert::error("Error", "Gagal Mengupdate");
+        }
+    }
+
+    /**
+     * Remove the specified resource from storage.
+     */
+    public function destroy(LetterPenghasilan $letterPenghasilan, $id)
+    {
+        $surat = LetterPenghasilan::with('letter')->find($id);
+
+        if ($surat->letter && is_array($surat->letter->berkas)) {
+            foreach ($surat->letter->berkas as $file) {
+                Storage::disk('public')->delete($file['path']);
+            }
+        }
+
+        $surat->letter()->delete();
+        $surat->delete();
+        Alert::success('Success', 'Pengajuan Berhasil Dihapus');
+        return redirect()->route('surat-keterangan-penghasilan.index');
+    }
+
+
+    // ================== Helper ================================
+    private function validateRequest(Request $request, bool $includeFiles = true): array
+    {
+        $rules = [
             'nama_pemohon' => 'required|string|max:255',
             'nik_pemohon' => 'required|string|max:255',
             'pekerjaan' => 'required|string|max:255',
@@ -215,23 +266,39 @@ class LetterPenghasilanController extends Controller
             'tanggal_lahir_anak' => 'required',
             'agama_anak' => 'required',
             'alamat_anak' => 'required',
-        ]);
+        ];
 
-        $surat = LetterPenghasilan::with('letter')->find(decrypt($id));
-        $surat->update($validated);
-        Alert::success('Success', 'Pengajuan Berhasil Diubah');
-        return redirect()->route('surat-keterangan-penghasilan.index');
+        if ($includeFiles) {
+            $fileRule = 'nullable|mimes:jpg,jpeg,png,pdf';
+            $rules += [
+                'scan_ktp'                 => $fileRule,
+                'scan_kk'                  => $fileRule,
+            ];
+        }
+
+        return $request->validate($rules);
     }
 
     /**
-     * Remove the specified resource from storage.
+     * Simpan seluruh lampiran ke storage & kembalikan metadata.
+     *
+     * @throws FileNotFoundException
      */
-    public function destroy(LetterPenghasilan $letterPenghasilan, $id)
+    private function storeFiles(Request $request): array
     {
-        $surat = LetterPenghasilan::with('letter')->find($id);
-        $surat->letter()->delete();
-        $surat->delete();
-        Alert::success('Success', 'Pengajuan Berhasil Dihapus');
-        return redirect()->route('surat-keterangan-penghasilan.index');
+        return collect(['scan_ktp', 'scan_kk'])
+            ->filter(fn($field) => $request->hasFile($field))
+            ->map(function ($field) use ($request) {
+                $file       = $request->file($field);
+                $filename   = $field . '_' . now()->timestamp . '.' . $file->getClientOriginalExtension();
+                $storedPath = $file->storeAs('letters/penghasilan_ortu', $filename, 'public');
+
+                return [
+                    'name' => $field,
+                    'path' => $storedPath,
+                ];
+            })
+            ->values()
+            ->all();
     }
 }

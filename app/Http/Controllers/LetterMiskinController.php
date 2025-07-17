@@ -72,7 +72,7 @@ class LetterMiskinController extends Controller
         $validatedData = $this->validateRequest($request);
 
         try {
-            DB::transaction(function () use ($user, $request,$validatedData) {
+            DB::transaction(function () use ($user, $request, $validatedData) {
 
                 $letterMiskin = LetterMiskin::create($validatedData);
 
@@ -80,7 +80,7 @@ class LetterMiskinController extends Controller
 
                 $letter = new Letter([
                     'user_id' => $user->id,
-                    'priority' => 8,
+                    'priority' => 1,
                     'status' => 'sedang diproses',
                     'berkas' => $filesMeta
                 ]);
@@ -160,7 +160,7 @@ class LetterMiskinController extends Controller
 
                 $surat->update($validatedData);
 
-                $meta = collect($surat->letter->berkas); 
+                $meta = collect($surat->letter->berkas);
 
                 foreach (['scan_ktp', 'scan_kk', 'scan_surat_keterangan'] as $field) {
                     if ($request->hasFile($field)) {
@@ -185,7 +185,7 @@ class LetterMiskinController extends Controller
             Alert::success('Success', 'Pengajuan Berhasil Diupdate');
             return redirect()->route('surat-keterangan-miskin.index');
         } catch (Exception $e) {
-            Alert::error("Error","Gagal Memperbarui");
+            Alert::error("Error", "Gagal Memperbarui");
             return back();
         }
     }
@@ -226,6 +226,13 @@ class LetterMiskinController extends Controller
     public function destroy(LetterMiskin $letterMiskin, $id)
     {
         $surat = LetterMiskin::with('letter')->find($id);
+        // Hapus semua file dari storage
+        if ($surat->letter && is_array($surat->letter->berkas)) {
+            foreach ($surat->letter->berkas as $file) {
+                Storage::disk('public')->delete($file['path']);
+            }
+        }
+
         $surat->letter()->delete();
         $surat->delete();
         Alert::success('Success', 'Pengajuan Berhasil Dihapus');
